@@ -21,5 +21,9 @@ module EasyIO
     "#{datetime.strftime('%Y-%m-%d %H:%M:%S')} #{severity}: #{msg}\n"
   end
 
-  attr_reader :logger
+  # For portability, can be overridden with a class that has methods :level, :fatal, :error, :warn, :info, :debug and the others specified below.
+  # See https://ruby-doc.org/stdlib-2.4.0/libdoc/logger/rdoc/Logger.html
+  #
+  # For example, when using with Chef, set the logger to Chef::Log
+  attr_accessor :logger
 end
