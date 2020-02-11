@@ -19,7 +19,10 @@ require 'easy_format'
 require 'logger'
 require 'open3'
 require 'fileutils'
+require 'os'
+require 'win32/registry' if OS.windows?
 require_relative 'easy_io/disk'
 require_relative 'easy_io/logger'
+require_relative 'easy_io/registry' if OS.windows?
 require_relative 'easy_io/run'
 require_relative 'easy_io/terminal'
