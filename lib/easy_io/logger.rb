@@ -26,4 +26,15 @@ module EasyIO
   #
   # For example, when using with Chef, set the logger to Chef::Log
   attr_accessor :logger
+
+  def self.levels
+    {
+      'info' => Logger::INFO,
+      'debug' => Logger::DEBUG,
+      'warn' => Logger::WARN,
+      'error' => Logger::ERROR,
+      'fatal' => Logger::FATAL,
+      'unknown' => Logger::UNKNOWN,
+    }
+  end
 end
