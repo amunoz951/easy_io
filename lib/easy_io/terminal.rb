@@ -21,7 +21,7 @@ module EasyIO
     end
 
     def line(filler_character)
-      filler_character * (TerminalSize.columns - 1)
+      filler_character * (Terminal.columns - 1)
     end
 
     def interactive?
