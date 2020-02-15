@@ -2,7 +2,7 @@
 
 Gem::Specification.new do |spec|
   spec.name          = 'easy_io'
-  spec.version       = '0.1.0'
+  spec.version       = '0.1.1'
   spec.authors       = ['Alex Munoz']
   spec.email         = ['amunoz951@gmail.com']
   spec.license       = 'Apache-2.0'
@@ -14,9 +14,8 @@ Gem::Specification.new do |spec|
   spec.files         = Dir['LICENSE', 'lib/**/*']
   spec.require_paths = ['lib']
 
-  spec.add_dependency 'easy_format'
-  spec.add_dependency 'logger'
-  spec.add_dependency 'open3'
-  spec.add_dependency 'fileutils'
-  spec.add_dependency 'win32api'
+  spec.add_dependency 'easy_format', '~> 0'
+  spec.add_dependency 'easy_json_config', '~> 0'
+  spec.add_dependency 'logger', '~> 1'
+  spec.add_dependency 'open3', '~> 0'
 end
