@@ -16,11 +16,19 @@
 # limitations under the License.
 
 require 'easy_format'
+require 'easy_json_config'
 require 'logger'
 require 'open3'
 require 'fileutils'
+require 'tmpdir'
 require 'os'
-require 'win32/registry' if OS.windows?
+require 'digest'
+if OS.windows?
+  require 'win32/registry'
+  require 'win32api'
+end
+
+require_relative 'easy_io/config'
 require_relative 'easy_io/disk'
 require_relative 'easy_io/logger'
 require_relative 'easy_io/registry' if OS.windows?
