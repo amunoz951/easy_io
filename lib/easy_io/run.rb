@@ -77,6 +77,60 @@ module EasyIO
     execute_out(ps_script, pid_logfile: pid_logfile, working_folder: working_folder, regex_error_filters: regex_error_filters, info_on_exception: info_on_exception, exception_exceptions: exception_exceptions, powershell: true, show_command_on_error: show_command_on_error, return_all_stdout: return_all_stdout, output_separator: output_separator)
   end
 
+  def run_remote_powershell_command(remote_host, command, credentials, set_as_trusted_host: false)
+    add_as_winrm_trusted_host(remote_host) if set_as_trusted_host
+
+    remote_command = <<-EOS
+      $securePassword = ConvertTo-SecureString -AsPlainText '#{credentials['password']}' -Force
+      $credential = New-Object System.Management.Automation.PSCredential -ArgumentList #{credentials['user']}, $securePassword
+      Invoke-Command -ComputerName #{remote_host} -Credential $credential -ScriptBlock { #{command} }
+    EOS
+    output = powershell_out(remote_command, return_all_stdout: true)
+    {
+      'stdout' => output.first,
+      'exitcode' => output.last,
+    }
+  rescue => ex
+    {
+      'exception' => ex,
+      'stderr' => ex.message,
+      'exitcode' => 1,
+    }
+  end
+
+  def run_command_on_remote_hosts(remote_hosts, command, credentials, command_message: nil, shell_type: :cmd, tail_count: nil, set_as_trusted_host: false)
+    tail_count ||= 1 # Return the last (1) line from each remote_host's log to the console
+    supported_shell_types = [:cmd, :powershell] # TODO: implement shell_type :bash
+    raise "Unsupported shell_type for running remote commands: '#{shell_type}'" unless supported_shell_types.include?(shell_type)
+
+    threads = {}
+    threads_output = {}
+    log_folder = "#{EasyIO.config['paths']['cache']}/easy_io/logs"
+    ::FileUtils.mkdir_p log_folder unless ::File.directory?(log_folder)
+    EasyIO.logger.info "Output logs of processes run on the specified remote hosts will be placed in #{log_folder}..."
+    remote_hosts.each do |remote_host|
+      EasyIO.logger.info "Running `#{command_message || command}` on #{remote_host}..."
+      # threads_output[remote_host] = run_remote_powershell_command(remote_host, command, credentials, set_as_trusted_host: set_as_trusted_host)
+      threads[remote_host] = Thread.new do
+        threads_output[remote_host] = run_remote_powershell_command(remote_host, command, credentials, set_as_trusted_host: set_as_trusted_host)
+      end
+    end
+    threads.values.each(&:join) # Wait for all commands to complete
+    # threads.each { |remote_host, thread| pp thread }
+    threads_output.each do |remote_host, output|
+      ::File.write("#{log_folder}/#{EasyFormat::File.windows_friendly_name(remote_host)}.#{EasyFormat::DateTime.yyyymmdd_hhmmss}.log", "#{output['stdout']}\n#{output['stderr']}")
+      tail_output = output['stdout'].nil? ? '--no standard output--' : output['stdout'].split("\n").last(tail_count).join("\n")
+      EasyIO.logger.info "[#{remote_host}]: #{tail_output}"
+      raise "Failed to run command on #{remote_host}: #{output['stderr']}\n#{output['exception'].cause}\n#{output['exception'].message}" if output['exception']
+      raise "The script exited with exit code #{output['exitcode']}.\n\n#{output['stderr']}" unless output['exitcode'] == 0
+    end
+  end
+
+  def add_as_winrm_trusted_host(remote_host)
+    trusted_hosts = EasyIO.powershell_out('(Get-Item WSMan:\localhost\Client\TrustedHosts).value', return_all_stdout: true)
+    EasyIO.powershell_out("Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value 'trusted_hosts, #{remote_host}' -Force") unless trusted_hosts.include?(remote_host)
+  end
+
   def _parse_for_errors(message, error_messages, error_options, command)
     errors_found = error_options['regex_error_filters'].any? { |regex_filter| message =~ regex_filter }
     _process_error_message(message, error_messages, error_options, command) if errors_found
