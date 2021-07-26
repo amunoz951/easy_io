@@ -2,6 +2,12 @@ module EasyIO
   module Terminal
     module_function
 
+    # Forces real-time output
+    def sync_output
+      $stdout.sync = true
+      $stderr.sync = true
+    end
+
     # returns [rows, columns]
     def dimensions
       require 'io/console'

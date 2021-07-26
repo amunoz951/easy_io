@@ -77,7 +77,7 @@ module EasyIO
     execute_out(ps_script, pid_logfile: pid_logfile, working_folder: working_folder, regex_error_filters: regex_error_filters, info_on_exception: info_on_exception, exception_exceptions: exception_exceptions, powershell: true, show_command_on_error: show_command_on_error, return_all_stdout: return_all_stdout, output_separator: output_separator)
   end
 
-  def run_remote_powershell_command(remote_host, command, credentials, set_as_trusted_host: false)
+  def run_remote_winrm_command(remote_host, command, credentials, set_as_trusted_host: false)
     add_as_winrm_trusted_host(remote_host) if set_as_trusted_host
 
     remote_command = <<-EOS
@@ -98,9 +98,76 @@ module EasyIO
     }
   end
 
-  def run_command_on_remote_hosts(remote_hosts, command, credentials, command_message: nil, shell_type: :cmd, tail_count: nil, set_as_trusted_host: false)
+  def run_remote_powershell_command(remote_host, command, credentials, set_as_trusted_host: false, transport: :ssh, output_stream: nil, output_file: nil, output_to_terminal: false)
+    return run_remote_winrm_command(remote_host, command, credentials, set_as_trusted_host: set_as_trusted_host) if transport == :winrm
+    command = 'powershell.exe ' unless command =~ /powershell/i
+    run_remote_command(remote_host, command, credentials, output_stream: output_stream, output_file: output_file, output_to_terminal: output_to_terminal)
+  end
+
+  def run_remote_command(remote_host, command, credentials, ssh_key: nil, output_stream: nil, output_file: nil, output_to_terminal: false, show_command_on_error: false)
+    require 'net/ssh'
+    start_params = if credentials['password'].nil?
+                     {
+                       host_key: 'ssh-rsa',
+                       keys: [ssh_key],
+                       verify_host_key: false,
+                     }
+                   else
+                     {
+                       password: credentials['password'],
+                     }
+                   end
+
+    retries ||= 3
+    return_code = nil
+    keep_stream_open = !output_stream.nil? # Leave the stream open if it was passed in
+    output_stream ||= ::File.open(output_file, ::File::RDWR | ::File::CREAT) unless output_file.nil?
+    stdout = ''
+
+    Net::SSH.start(remote_host, credentials['user'], **start_params) do |ssh|
+      command_thread = ssh.open_channel do |channel|
+        channel.exec(command) do |ch, success|
+          raise 'could not execute command' unless success
+
+          ch.on_data { |_c, data| stdout += data; process_command_output(data, output_stream, output_to_terminal) }
+          ch.on_extended_data { |_c, _type, data| stdout += data; process_command_output(data, output_stream, output_to_terminal) }
+          ch.on_request('exit-status') { |_ch, data| return_code = data.read_long }
+        end
+      end
+      command_thread.wait
+    end
+    {
+      'stdout' => stdout,
+      'exitcode' => return_code,
+    }
+  rescue Net::SSH::ConnectionTimeout => ex
+    EasyIO.logger.info 'Net::SSH::ConnectionTimeout - retrying...'
+    retry if (retries -= 1) >= 0
+    {
+      'exception' => ex,
+      'stderr' => (show_command_on_error ? "command: #{command}\n\n#{ex.message}" : ex.message) + "\n\n#{ex.backtrace}",
+      'exitcode' => return_code,
+    }
+  rescue => ex
+    {
+      'exception' => ex,
+      'stderr' => (show_command_on_error ? "command: #{command}\n\n#{ex.message}" : ex.message) + "\n\n#{ex.backtrace}",
+      'exitcode' => return_code,
+    }
+  ensure
+    output_stream.close unless keep_stream_open || !output_stream.respond_to?(:close)
+  end
+
+  def process_command_output(data, output_stream, output_to_terminal)
+    output_stream << data if output_stream
+    EasyIO.logger.info data if output_to_terminal
+  end
+
+  def run_command_on_remote_hosts(remote_hosts, command, credentials, command_message: nil, shell_type: nil, tail_count: nil, set_as_trusted_host: false, transport: :ssh)
     tail_count ||= 1 # Return the last (1) line from each remote_host's log to the console
-    supported_shell_types = [:cmd, :powershell] # TODO: implement shell_type :bash
+    shell_type ||= OS.windows? ? :cmd : :bash
+    shell_type = shell_type.to_sym unless shell_type.is_a?(Symbol)
+    supported_shell_types = OS.windows? ? [:cmd, :powershell] : [:bash]
     raise "Unsupported shell_type for running remote commands: '#{shell_type}'" unless supported_shell_types.include?(shell_type)
 
     threads = {}
@@ -110,20 +177,28 @@ module EasyIO
     EasyIO.logger.info "Output logs of processes run on the specified remote hosts will be placed in #{log_folder}..."
     remote_hosts.each do |remote_host|
       EasyIO.logger.info "Running `#{command_message || command}` on #{remote_host}..."
-      # threads_output[remote_host] = run_remote_powershell_command(remote_host, command, credentials, set_as_trusted_host: set_as_trusted_host)
       threads[remote_host] = Thread.new do
-        threads_output[remote_host] = run_remote_powershell_command(remote_host, command, credentials, set_as_trusted_host: set_as_trusted_host)
+        case shell_type
+        when :powershell
+          threads_output[remote_host] = run_remote_powershell_command(remote_host, command, credentials, set_as_trusted_host: set_as_trusted_host, transport: transport)
+        when :cmd, :bash
+          threads_output[remote_host] = run_remote_command(remote_host, command, credentials)
+        end
       end
     end
     threads.values.each(&:join) # Wait for all commands to complete
-    # threads.each { |remote_host, thread| pp thread }
+    exceptions = []
     threads_output.each do |remote_host, output|
-      ::File.write("#{log_folder}/#{EasyFormat::File.windows_friendly_name(remote_host)}.#{EasyFormat::DateTime.yyyymmdd_hhmmss}.log", "#{output['stdout']}\n#{output['stderr']}")
+      ::File.write("#{log_folder}/#{EasyFormat::File.windows_friendly_name(remote_host)}.#{::Time.now.strftime('%Y%m%d_%H%M%S')}.log", "#{output['stdout']}\n#{output['stderr']}")
       tail_output = output['stdout'].nil? ? '--no standard output--' : output['stdout'].split("\n").last(tail_count).join("\n")
       EasyIO.logger.info "[#{remote_host}]: #{tail_output}"
-      raise "Failed to run command on #{remote_host}: #{output['stderr']}\n#{output['exception'].cause}\n#{output['exception'].message}" if output['exception']
-      raise "The script exited with exit code #{output['exitcode']}.\n\n#{output['stderr']}" unless output['exitcode'] == 0
+      if output['exception']
+        exceptions.push "Failed to run command on #{remote_host}: #{output['stderr']}\n#{output['exception'].cause}\n#{output['exception'].message}"
+        next
+      end
+      exceptions.push "The script exited with exit code #{output['exitcode']}.\n\n#{output['stderr']}" unless output['exitcode'] == 0
     end
+    raise exceptions.join("\n\n") unless exceptions.empty?
   end
 
   def add_as_winrm_trusted_host(remote_host)
