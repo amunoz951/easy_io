@@ -2,7 +2,7 @@
 
 Gem::Specification.new do |spec|
   spec.name          = 'easy_io'
-  spec.version       = '0.1.1'
+  spec.version       = '0.4.3'
   spec.authors       = ['Alex Munoz']
   spec.email         = ['amunoz951@gmail.com']
   spec.license       = 'Apache-2.0'
