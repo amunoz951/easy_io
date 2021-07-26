@@ -4,6 +4,7 @@ module EasyIO
   # execute a command with real-time output. Any stdout you want returned to the caller must come after the :output_separator which defaults to '#return_data#:'
   #   return_all_stdout: return all output to the caller instead after process completion
   def execute_out(command, pid_logfile: nil, working_folder: Dir.pwd, regex_error_filters: [], info_on_exception: '', exception_exceptions: [], powershell: false, show_command_on_error: false, raise_on_first_error: true, return_all_stdout: false, output_separator: nil)
+    raise "Invalid argument to execute_out! working_folder (#{working_folder}) is not a valid directory!" unless ::File.directory?(working_folder)
     output_separator ||= '#return_data#:'
     if return_all_stdout
       result = ''
@@ -18,49 +19,48 @@ module EasyIO
     info_on_exception = "#{info_on_exception}\n" unless info_on_exception.end_with?("\n")
     error_options = { 'show_command_on_error' => show_command_on_error, 'info_on_exception' => info_on_exception, 'regex_error_filters' => regex_error_filters, 'raise_on_first_error' => raise_on_first_error }
     if powershell
-      ps_script_file = "#{EasyIO.config['paths']['cache']}/scripts/ps_script-thread_id-#{Thread.current.object_id}.ps1"
+      ps_script_file = "#{EasyIO.config['paths']['cache']}/easy_io/scripts/ps_script-thread_id-#{Thread.current.object_id}.ps1"
       FileUtils.mkdir_p(::File.dirname(ps_script_file)) unless ::File.directory? ::File.dirname(ps_script_file)
       ::File.write(ps_script_file, command)
     end
+
     popen_arguments = powershell ? ['powershell.exe', ps_script_file] : [command]
-    Dir.chdir(working_folder) do
-      Open3.popen3(*popen_arguments) do |_stdin, stdout, stderr, wait_thread|
-        unless pid_logfile.nil? # Log pid in case job or script dies
-          FileUtils.mkdir_p(::File.dirname(pid_logfile)) unless ::File.directory? ::File.dirname(pid_logfile)
-          ::File.write(pid_logfile, wait_thread.pid)
-        end
-        buffers = [stdout, stderr]
-        queued_buffers = IO.select(buffers) || [[]]
-        queued_buffers.first.each do |buffer|
-          case buffer
-          when stdout
-            while (line = buffer.gets)
-              if return_data_flag
-                result += line
-                next
-              end
-              stdout_split = line.split(output_separator)
-              stdout_message = stdout_split.first.strip
-              _parse_for_errors(stdout_message, error_messages, error_options, command)
-              EasyIO.logger.info stdout_message unless stdout_message.empty?
-              if stdout_split.count > 1
-                return_data_flag = true
-                result = stdout_split.last
-              end
-            end
-          when stderr
-            error_message = ''
-            error_message += line while (line = buffer.gets)
-            next if error_message.empty?
-            if exception_exceptions.any? { |ignore_filter| error_message =~ ignore_filter }
-              EasyIO.logger.info error_message.strip
+    Open3.popen3(*popen_arguments, chdir: working_folder) do |_stdin, stdout, stderr, wait_thread|
+      unless pid_logfile.nil? # Log pid in case job or script dies
+        FileUtils.mkdir_p(::File.dirname(pid_logfile)) unless ::File.directory? ::File.dirname(pid_logfile)
+        ::File.write(pid_logfile, wait_thread.pid)
+      end
+      buffers = [stdout, stderr]
+      queued_buffers = IO.select(buffers) || [[]]
+      queued_buffers.first.each do |buffer|
+        case buffer
+        when stdout
+          while (line = buffer.gets)
+            if return_data_flag
+              result += line
               next
             end
-            _process_error_message(error_message, error_messages, error_options, command)
+            stdout_split = line.split(output_separator)
+            stdout_message = stdout_split.first.strip
+            _parse_for_errors(stdout_message, error_messages, error_options, command)
+            EasyIO.logger.info stdout_message unless stdout_message.empty?
+            if stdout_split.count > 1
+              return_data_flag = true
+              result = stdout_split.last
+            end
           end
+        when stderr
+          error_message = ''
+          error_message += line while (line = buffer.gets)
+          next if error_message.empty?
+          if exception_exceptions.any? { |ignore_filter| error_message =~ ignore_filter }
+            EasyIO.logger.info error_message.strip
+            next
+          end
+          _process_error_message(error_message, error_messages, error_options, command)
         end
-        exit_status = wait_thread.value
       end
+      exit_status = wait_thread.value
     end
     unless error_messages.empty?
       last_error = _full_error_message(error_messages.pop, error_options, command)
