@@ -56,5 +56,29 @@ module EasyIO
       return false if sha256_checksum.nil? || !::File.exist?(file)
       Digest::SHA256.file(file).hexdigest.downcase == sha256_checksum.downcase
     end
+
+    # Opens a file in the filesystem and locks it exclusively. If it fails, it will keep trying until the timeout.
+    # Pass a block to be executed while the file is locked. The ::File object is passed to the block.
+    def open_file_and_wait_for_exclusive_lock(path, timeout: 60, status_interval: 15, silent: false)
+      start_time = Time.now
+      raise "Cannot create #{::File.basename(path)} - the parent directory does not exist (#{::File.dirname(path)})!" unless ::File.directory?(::File.dirname(path))
+      ::File.open(path, ::File::RDWR | ::File::CREAT) do |file|
+        loop do
+          if Time.now >= start_time + timeout # locking timed out.
+            file.close
+            raise "Failed to gain exclusive lock on #{path}! Timed out after #{timeout} seconds."
+          end
+          lock_success = file.flock(File::LOCK_EX | File::LOCK_NB)
+          if lock_success
+            yield(file) if block_given?
+            file.close
+            break
+          end
+          seconds_elapsed = Time.now - start_time
+          EasyIO.logger.info "Waiting for another process to unlock #{path}... Time elapsed: #{seconds_elapsed}" if seconds_elapsed % status_interval == 0 && !silent # Output status every (status_interval) seconds
+          sleep(1)
+        end
+      end
+    end
   end
 end
