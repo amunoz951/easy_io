@@ -23,9 +23,9 @@ require 'fileutils'
 require 'tmpdir'
 require 'os'
 require 'digest'
+require 'sys/filesystem'
 if OS.windows?
   require 'win32/registry'
-  require 'win32api'
 end
 
 require_relative 'easy_io/config'

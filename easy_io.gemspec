@@ -2,7 +2,7 @@
 
 Gem::Specification.new do |spec|
   spec.name          = 'easy_io'
-  spec.version       = '0.4.3'
+  spec.version       = '0.5.0'
   spec.authors       = ['Alex Munoz']
   spec.email         = ['amunoz951@gmail.com']
   spec.license       = 'Apache-2.0'
@@ -18,4 +18,5 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'easy_json_config', '~> 0'
   spec.add_dependency 'logger', '~> 1'
   spec.add_dependency 'open3', '~> 0'
+  spec.add_dependency 'sys-filesystem', '~> 1'
 end

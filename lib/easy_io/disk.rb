@@ -1,9 +1,5 @@
 module EasyIO
   module Disk
-    unless defined? GetDiskFreeSpaceEx
-      GetDiskFreeSpaceEx = Win32API.new('kernel32', 'GetDiskFreeSpaceEx', 'PPPP', 'I') if OS.windows? # TODO: make this cross platform. sys-filesystem gem maybe?
-    end
-
     module_function
 
     def free_space(path)
@@ -13,11 +9,7 @@ module EasyIO
       raise "Cannot check free space for #{path} - The path was not found." if root_folder.nil? || root_folder.empty?
       root_folder = EasyFormat::Directory.ensure_trailing_slash(root_folder)
 
-      free = [0].pack('Q')
-      GetDiskFreeSpaceEx.call(root_folder, 0, 0, free)
-      free = free.unpack1('Q')
-
-      (free / 1024.0 / 1024.0).round(2)
+      (Sys::Filesystem.stat(root_folder).bytes_free / 1024.0 / 1024.0).round(2)
     end
 
     def size(path)
@@ -27,11 +19,7 @@ module EasyIO
       raise "Cannot check free space for #{path} - The path was not found." if root_folder.nil? || root_folder.empty?
       root_folder = EasyFormat::Directory.ensure_trailing_slash(root_folder)
 
-      total = [0].pack('Q')
-      GetDiskFreeSpaceEx.call(root_folder, 0, total, 0)
-      total = total.unpack1('Q')
-
-      (total / 1024.0 / 1024.0).round(2)
+      (Sys::Filesystem.stat(root_folder).bytes_total / 1024.0 / 1024.0).round(2)
     end
 
     def move_files(search_string, destination_folder)
