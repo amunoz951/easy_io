@@ -24,9 +24,7 @@ require 'tmpdir'
 require 'os'
 require 'digest'
 require 'sys/filesystem'
-if OS.windows?
-  require 'win32/registry'
-end
+require 'win32/registry' if OS.windows? && !defined?(::Win32::Registry)
 
 require_relative 'easy_io/config'
 require_relative 'easy_io/disk'

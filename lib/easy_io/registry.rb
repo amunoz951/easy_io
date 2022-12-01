@@ -7,7 +7,7 @@ module EasyIO
     end
 
     def key_exists?(path)
-      Win32::Registry::HKEY_LOCAL_MACHINE.open(path, ::Win32::Registry::KEY_READ)
+      ::Win32::Registry::HKEY_LOCAL_MACHINE.open(path, ::Win32::Registry::KEY_READ)
       true
     rescue
       false
